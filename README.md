@@ -78,7 +78,7 @@ slashes "/" will be replaced to "%" symbol for correctly filenames). Compressed 
 First archive with the same extension in the target directory will have number 0, next  -  1,2,3 etc. Archive numbering for
 different extensions (.gz or .zfs) will be independent, from current number of every archive type.
 
-Note:  Do not rename arhives, archive names wiil use in zfsrestore for filesystem recovery with omitted target filesystem name.
+Note:  Do not rename arhives, archive names will use in zfsrestore for filesystem recovery with omitted target filesystem name.
 
 Backup performs with run command in local mode:
 
