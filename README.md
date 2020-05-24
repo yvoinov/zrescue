@@ -73,8 +73,7 @@ By default archive names generates with incremental sequense in following format
 ```
 
 where hostname - machine name for which backup performing, pool|pool%dataset - ZFS-pool or dataset name (note, that for dataset
-slashes "/" will be replaced to "%" symbol for correctly filenames). Compressed ZFS-streams has .gz extension, uncompressed
-- .zfs.
+slashes "/" will be replaced to "%" symbol for correctly filenames). Compressed ZFS-streams has .gz extension, uncompressed .zfs.
 
 First archive with the same extension in the target directory will have number 0, next  -  1,2,3 etc. Archive numbering for
 different extensions (.gz or .zfs) will be independent, from current number of every archive type.
