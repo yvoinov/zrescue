@@ -79,7 +79,7 @@ where hostname - machine name for which backup performing, pool|pool%dataset - Z
 First archive with the same extension in the target
 directory will have number 0, next - 1,2,3 etc. Archive numbering for different extensions (.gz or .zfs) will be independent, from current number of every archive type.
 
-ATTENTION! Do not rename arhives, archive names wiil use in \fIzfsrestore\fR for filesystem recovery with omit target filesystem name.
+ATTENTION! Do not rename archives, archive names wiil use in \fIzfsrestore\fR for filesystem recovery with omit target filesystem name.
 .br
 
 .br
@@ -92,7 +92,7 @@ or in remote mode:
 # \fIzfsbackup\fR [-v] [-n] -r [-f] remote_fs /mntpt|local_fs 
                              [user@][host]
 
-In both case arguments are required. First argument represents local or remote ZFS-pool or dataset to be archived, second - local or NFS mountpoint with write permissions or local fs to receive fs, third argument in remote mode represents remote host from which fs will backup.
+In both cases arguments are required. First argument represents local or remote ZFS-pool or dataset to be archived, second - local or NFS mountpoint with write permissions or local fs to receive fs, third argument in remote mode represents remote host from which fs will backup.
 
 Remote backup (-r option) can be done from remote machine to local ZFS filesystem or to local archive with option -f (compressed or none, option to disable compression is -n). Option -f valid only for remote backups.
 
