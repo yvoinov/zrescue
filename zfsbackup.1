@@ -1,0 +1,139 @@
+.\" Copyright 2009,2016 Yuri Voinov"
+.\" Copyright (c) 2009,2016 Yuri Voinov Lab. All Rights Reserved"
+
+.nr N 10
+.nr D 5
+.TH ZFSBACKUP 1M "22 October 2009"
+.UC 4
+
+.br
+.SH NAME
+.br
+\fIzfsbackup\fR \- ZFS backup utility
+.br
+
+.br
+.SH SYNOPSIS
+
+.br
+\fIzfsbackup\fR [-v] [-n] local_fs /mntpt
+.br
+
+.br
+\fIzfsbackup\fR [-v] [-n] -r [-f] remote_fs
+                            /mntpt|local_fs [user@][host]
+.br
+
+.br
+.SH DESCRIPTION
+
+.br
+This package are written for compressed backups creation for ZFS data pools (including root pools) and separate datasets for bare-metal restore, systems cloning and physical standby's creation, support and common backup purposes.
+
+It contains two main programs, \fIzfsbackup\fR and \fIzfsrestore\fR, which can be used from command line (also from cron), on standalone systems or as part of complex backup solution. Backups creation process using GZip with maximum compression by default, to reduce backups size and network traffic.
+
+Package can backup data to local or NFS mountpoint, or from remote machine to backup server to local ZFS filesystem.
+
+You can create backups on backup server from remote machines directly to file archive (not only to local ZFS filesystem) onto disk or tape device.
+
+On backup server you also can backup received fs to file archive using this package.
+
+Filesystems restore also can be from local or NFS mountpoint with created by \fIzfsbackup\fR archive file or from backup server to remote machine.
+.br
+
+.br
+.SH OPTIONS
+.TP
+.B \-v
+Verbose flag.
+.TP
+.B \-n
+Turn off compression (both on local and remote side).
+.TP
+.B \-r
+Remote mode - backup from remote machine. By default (without -f option) backup will be done to local ZFS filesystem.
+.TP
+.B \-f
+Remote mode - backup from remote machine to file (compressed by default, uncompressed with -n option).
+
+.SH PERFORMING BACKUP
+
+.br
+Command \fIzfsbackup\fR can be run with two modes:
+
+1. Backup to mountpoint (local or NFS).
+.br
+2. Backup from remote machine to backup server via SSH.
+
+Command will be compress data (stream) in case of finding GZip with maximum compression level (gzip -9).
+
+It makes full recursive snapshot for ZFS-pool or dataset, with compression by default and saves it into specified
+mountpoint (local of NFS) with write permissions or send from remote machine to backup server via SSH.
+
+By default archive names generates with incremental sequense in following format:
+
+[hostname].[pool|pool%dataset].n.zfs<.gz>, n=0,1,2...
+
+where hostname - machine name for which backup performing, pool|pool%dataset - ZFS-pool or dataset name (note, that for dataset slashes "/" will be replaced to "%" symbol for correctly filenames). Compressed ZFS-streams has .gz extension, uncompressed - .zfs.
+
+First archive with the same extension in the target
+directory will have number 0, next - 1,2,3 etc. Archive numbering for different extensions (.gz or .zfs) will be independent, from current number of every archive type.
+
+ATTENTION! Do not rename arhives, archive names wiil use in \fIzfsrestore\fR for filesystem recovery with omit target filesystem name.
+.br
+
+.br
+Backup performs with run command in local mode:
+
+# \fIzfsbackup\fR [-v] [-n] local_fs /mntpt
+
+or in remote mode:
+
+# \fIzfsbackup\fR [-v] [-n] -r [-f] remote_fs /mntpt|local_fs 
+                             [user@][host]
+
+In both case arguments are required. First argument represents local or remote ZFS-pool or dataset to be archived, second - local or NFS mountpoint with write permissions or local fs to receive fs, third argument in remote mode represents remote host from which fs will backup.
+
+Remote backup (-r option) can be done from remote machine to local ZFS filesystem or to local archive with option -f (compressed or none, option to disable compression is -n). Option -f valid only for remote backups.
+
+Command performs backup process logging, also(in verbose mode) it logging zfs send command working. All errors also redirects to OUTPUT and can be redirect to the log file.
+
+You also can include command call to cron, as shown on example:
+
+# Automated data backup job with zfs
+.br
+# Running weekly at 00:00 Saturday
+.br
+0 0 * * 6 [ -x /usr/local/bin/\fIzfsbackup\fR ] && \
+rm -f /backup/*.data.* > /dev/null 2>&1; \
+/usr/local/bin/\fIzfsbackup\fR data /backup >> /var/log/backup.log
+
+# Automated system backup job with zfs
+.br
+# Running weekly at 01:00 Saturday
+.br
+0 1 * * 6 [ -x /usr/local/bin/\fIzfsbackup\fR ] && \
+rm -f /backup/*.rpool.* > /dev/null 2>&1; \
+/usr/local/bin/\fIzfsbackup\fR -r rpool root@backup backup \
+>> /var/log/backup.log
+
+.br
+.SH SEE ALSO
+
+\fIzfsrestore\fR (1M),
+zfs (1M),
+zpool (1M),
+gzip (1M),
+ssh (1M)
+
+.SH NOTES
+
+\fIzfsbackup\fR/\fIzfsrestore\fR works on Solaris 10 10/08 and above and OpenSolaris 2008.11 and above.
+
+\fIzfsbackup\fR/\fIzfsrestore\fR supports ZFS archives creation and streams transfer from Solaris 10 8/07 (supports only non-root pools), from release 10/08 also supports ZFS root pools.
+
+Suggesting use \fIzfsbackup\fR/\fIzfsrestore\fR in multi-user mode, when /usr mountpoint is completely available. Data recovery with \fIzfsrestore\fR recommended, but not required, also you can restore data from archives with manual procedure (as described in \fIzfsrestore\fR (1M)), because of backup is simple ZFS-stream (compressed with GZip or not) or received filesystem, which is meant, that you can use command /sbin/zfs receive to recovery.
+
+ZRescue uses SSH for remote transfers. For huge data volumes it can generate heavy CPU usage on both hosts.
+
+.br

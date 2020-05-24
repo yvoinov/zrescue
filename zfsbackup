@@ -1,0 +1,343 @@
+#!/sbin/sh
+
+#
+# ZRescue - ZFS Backup/Restore
+#
+# ZFS archives uses for bare-metal restore
+# and systems cloning.
+#
+# Archive names will be incremental, like that:
+# [hostname].[pool|pool%dataset].n.zfs<.gz>, n=0,1,2...
+# Note: Do not rename archive files! Filenames will
+#       use to recovery purposes.
+#
+# Version 2.0 (C) 2009,2016 Y.Voinov
+#
+#pragma ident "@(#)zfsbackup.sh   2.0   10/22/09 YV"
+#
+
+#############
+# Variables #
+#############
+
+# Environment variables  
+PATH=/usr/local/bin:/sbin:/usr/bin:$PATH
+
+# Copyright and version
+PKG_NAME="ZRescue"
+PKG_VERSION="2.0"
+COPY="Copyright (C) 2009, Yuri Voinov"
+
+# Archive file suffix
+ARC_SUFFIX=".gz"
+# GZip default compression level
+COMP_LEVEL="9"
+# Default archive extension
+ext="zfs"
+# Initial archive sequence
+initial_arc_seq="0"
+
+# OS utilities
+BASENAME=`which basename`
+CUT=`which cut`
+DATE=`which date`
+ECHO=`which echo`
+EXPR=`which expr`
+GETOPT=`which getopt`
+GZIP=`which gzip`
+HOSTNAME=`which hostname`
+ID=`which id`
+PRINTF=`which printf`
+SED=`which sed`
+SSH=`which ssh`
+UNAME=`which uname`
+WHOAMI=`which whoami`
+ZFS=`which zfs`
+
+OS_VER=`$UNAME -r|$CUT -f2 -d"."`
+OS_NAME=`$UNAME -s|$CUT -f1 -d" "`
+OS_FULL=`$UNAME -sr`
+
+# System name
+system=`$HOSTNAME`
+
+# Snapshots extension by default  
+# Correct it if these snapshots already exists in the system
+SNAP_EXT="$system""_""$PKG_NAME""-""$PKG_VERSION""_snapshot"
+
+###############
+# Subroutines #
+###############
+
+check_os ()
+{
+ # Check OS
+ $PRINTF "Checking OS... "
+ if [ "$OS_NAME" = "SunOS" -a "$OS_VER" -lt "10" ]; then
+  $ECHO "ERROR: Unsupported OS: $OS_FULL"
+  $ECHO "Exiting..."
+  exit 1
+ else
+  $ECHO "$OS_FULL"
+ fi
+}
+
+check_root ()
+{
+ # Check if user root
+ $PRINTF "Checking super-user... "
+ if [ -f /usr/xpg4/bin/id ]; then
+  WHO=`/usr/xpg4/bin/id -n -u`
+ elif [ "`$ID | $CUT -f1 -d" "`" = "uid=0(root)" ]; then
+  WHO="root"
+ else
+  WHO=$WHOAMI
+ fi
+
+ if [ ! "$WHO" = "root" ]; then
+  $ECHO
+  $ECHO "ERROR: You must be super-user to run this script."
+  exit 1
+ fi
+ $ECHO "$WHO"
+}
+
+archive_exists ()
+{
+ # Check archive file exist
+ if [ "$compress" = "1" -a -f "$file.gz" ]; then
+   $ECHO "1"
+ elif [ "$compress" = "0" -a -f "$file" ]; then
+  $ECHO "1"
+ else
+  $ECHO "0"
+ fi
+}
+
+set_file ()
+{
+ # Check archive name exists
+ # and create new name if needful
+ remote_host_arg=$1
+ attempt=0
+
+ while [ "`archive_exists`" = "1" ]; do
+  file=`$ECHO $file|$CUT -f2 -d"."`
+  if [ -z "$remote_host_arg" ]; then
+   # Localhost file name
+   file="$dest/$system.$file.$attempt.$ext"
+  else
+   # Remote file name
+   file="$dest/$remote_host_arg.$file.$attempt.$ext"
+  fi
+  if [ "`archive_exists`" != "1" ]; then
+   break
+  fi
+  attempt=`expr $attempt + 1`
+ done
+}
+
+check_fs_exists ()
+{
+ # Check filesystem exists
+ arg_fs=$1
+
+ ret=`$ZFS list -H -o name $arg_fs > /dev/null 2>&1; $ECHO $?`
+ if [ "$ret" != "0" ]; then
+  $ECHO "ERROR: ZFS pool/dataset $arg_fs does not exist."
+  $ECHO "       Please specify another ZFS."
+  $ECHO "Exiting..."
+  exit 1
+ fi
+}
+
+check_dest_dir ()
+{
+ # Check directory exist and it writable
+ arg_dest=$1
+
+ if [ ! -d "$arg_dest" or ! -w "$arg_dest" ]; then
+  $ECHO "ERROR: Directory $arg_dest does not exist"
+  $ECHO "       or you haven't permissions to write."
+  $ECHO "Exiting..."
+  exit 1
+ fi 
+}
+
+copyright_and_version ()
+{
+ # Print package and copyright info
+ $ECHO
+ $ECHO "$PKG_NAME $PKG_VERSION $COPY"
+ $ECHO
+}
+
+usage_note ()
+{
+ copyright_and_version
+ $ECHO "Usage: `$BASENAME $0` [-v] [-n] [-r] [-f] [pool|dataset] [/mntpoint|local fs] [host]"
+ $ECHO
+ $ECHO "Note: Compression will use if GZip installed,"
+ $ECHO "      both for local archives or remote streams transfer."
+ $ECHO "Beware: GZip must be installed in both nodes in case of remote backup."
+ exit 1
+}
+
+destroy_fs ()
+{
+ # Destroy filesystem(s) recursively
+ arg_fs=$1
+
+ $ZFS destroy -r $arg_fs > /dev/null 2>&1
+
+ # Check exit code
+ if [ "`$ECHO $?`" != "0" ]; then
+  $ECHO "WARNING: Filesystem $arg_fs does not exists."
+ fi
+}
+
+create_snap ()
+{
+ # Create snapshot recursively
+ arg_filesys=$1
+
+ $ZFS snapshot -r "$arg_filesys@$SNAP_EXT"
+}
+
+zfs_send ()
+{
+ # Send filesystem to the destination
+ arg_filesys=$1
+ arg_dest=$2
+ arg_host=$3
+ # Verbose output flag set
+ if [ "$verbose" = "1" ]; then
+  verb="v"
+ fi
+ # When use compression, send fs with archiver
+ if [ "$compress" = "1" ]; then
+  if [ "$remote_mode" = "1" -a "$remote_file_archive" != "1" ]; then
+   # Send from remote with compression
+   $SSH $arg_host "/sbin/zfs snapshot -r $arg_filesys@$SNAP_EXT &&\
+   /sbin/zfs send -R$verb $arg_filesys@$SNAP_EXT|/bin/gzip -c -$COMP_LEVEL"|\
+   $GZIP -c -d -|$ZFS receive -dF$verb $arg_dest
+  elif [ "$remote_mode" = "1" -a "$remote_file_archive" = "1" ]; then
+   # Send from remote to file with compression
+   $SSH $arg_host "/sbin/zfs snapshot -r $arg_filesys@$SNAP_EXT &&\
+   /sbin/zfs send -R$verb $arg_filesys@$SNAP_EXT|/bin/gzip -c -$COMP_LEVEL">$file$ARC_SUFFIX
+  else
+   # Send to local with compression
+   $ZFS send -R"$verb" "$arg_filesys@$SNAP_EXT"|$GZIP -c "-$COMP_LEVEL">"$file$ARC_SUFFIX"
+  fi
+ else
+  if [ "$remote_mode" = "1" -a "$remote_file_archive" != "1" ]; then
+   # Send from remote without compression
+   $SSH $arg_host "/sbin/zfs snapshot -r $arg_filesys@$SNAP_EXT &&\
+   /sbin/zfs send -R$verb $arg_filesys@$SNAP_EXT"|\
+   $ZFS receive -dF$verb $arg_dest
+  elif [ "$remote_mode" = "1" -a "$remote_file_archive" = "1" ]; then
+   # Send from remote to file without compression
+   $SSH $arg_host "/sbin/zfs snapshot -r $arg_filesys@$SNAP_EXT &&\
+   /sbin/zfs send -R$verb $arg_filesys@$SNAP_EXT">$file$ARC_SUFFIX
+  else
+   # Send to local without compression
+   $ZFS send -R"$verb" "$arg_filesys@$SNAP_EXT">"$file"
+  fi
+ fi
+ # In remote mode destroy target snapshot on local machine and on remote machine
+ if [ "$remote_mode" = "1" ]; then
+  destroy_fs "`/sbin/zfs list -H -o name -t snapshot|/bin/grep $arg_dest`"
+  $SSH $arg_host "/sbin/zfs destroy -r `/sbin/zfs list -H -o name -t snapshot|\
+  /bin/grep $arg_filesys`> /dev/null 2>&1"
+ fi
+}
+
+##############
+# Main block #
+##############
+
+# Checking OS
+check_os
+
+# Checking root
+check_root
+
+# Check command-line arguments
+if [ "x$*" = "x" ]; then
+ # If arguments list empty, show usage note
+ usage_note
+else
+ arg_list=$*
+ # Parse command line
+ set -- `$GETOPT fFrRnNvVhH: $arg_list` || {
+  usage_note
+ }
+
+ # Read arguments
+ for i in $arg_list
+  do
+   case $i in
+    -f|-F) remote_file_archive="1";;
+    -r|-R) remote_mode="1";;
+    -n|-N) compress_off="1";;
+    -v|-V) verbose="1";;
+    -h|-H|\?) usage_note;;
+    *) shift
+       filesystem=$1
+       dest=$2;
+       remote_host=$3
+       break;;
+   esac
+   shift
+  done
+
+ # Remove trailing --
+ shift `$EXPR $OPTIND - 1`
+fi
+
+# Check filesystem exists
+check_fs_exists $filesystem
+
+$ECHO "*** BEGIN: ZFS backup for $filesystem at `$DATE`."
+
+# Check archiver
+if [ ! -f "$GZIP" -a ! -x "$GZIP" -o "$compress_off" = "1" ]; then
+ $ECHO "INFO: Compression will NOT be used. GZip not found or compression disabled."
+ compress="0"
+elif [ -f "$GZIP" -a -x "$GZIP" -a "$compress_off" != "1" ]; then
+ $ECHO "INFO: Data will be compressed with gzip -$COMP_LEVEL."
+ compress="1"
+fi
+
+if [ "$remote_mode" != "1" ]; then
+ # Check destination directory when file archive operation
+ check_dest_dir $dest
+ # Set initial archive file name
+ # Replase slashes with % if dataset specified in non-remote mode
+ file="$dest/$system.`$ECHO $filesystem | $SED -e 's/\//%/g'`.$initial_arc_seq.$ext"
+ # Set file name if incremental naming using
+ # (if archive with the same name already exists)
+ set_file
+else
+ # Replase slashes with % if dataset specified in non-remote mode
+ file="$dest/$remote_host.`$ECHO $filesystem | $SED -e 's/\//%/g'`.$initial_arc_seq.$ext"
+ set_file $remote_host
+fi
+
+# First destroy snapshots recursively if it exists
+destroy_fs "$filesystem@$SNAP_EXT"
+
+# Second create recursive snapshots
+if [ "$remote_mode" != "1" ]; then
+ create_snap $filesystem
+fi
+
+# Third send all snapshots recursively to archive
+zfs_send $filesystem $dest $remote_host
+
+# Finally destroy all snapshots recursively
+if [ "$remote_mode" != "1" ]; then
+ destroy_fs "$filesystem@$SNAP_EXT"
+fi
+
+$ECHO "*** DONE: ZFS backup for $filesystem at `$DATE`."

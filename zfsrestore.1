@@ -1,0 +1,235 @@
+.\" Copyright 2009,2016 Yuri Voinov"
+.\" Copyright (c) 2009,2016 Yuri Voinov Lab. All Rights Reserved"
+
+.nr N 10
+.nr D 5
+.TH ZFSRESTORE 1M "22 October 2009"
+.UC 4
+
+.br
+.SH NAME
+.br
+\fIzfsrestore\fR \- ZFS restore utility
+.br
+
+.br
+.SH SYNOPSIS
+
+.br
+\fIzfsrestore\fR [-v] [-n ] /mntpoint/archive [remote_fs]
+.br
+
+.br
+\fIzfsrestore\fR [-v] -r [-f] /mntpt/arc|local_fs
+                        [remote_fs] [user@]host
+.br
+
+.br
+.SH DESCRIPTION
+
+.br
+This package are written for compressed backups creation for ZFS data pools (including root pools) and separate datasets for bare-metal restore, systems cloning and physical standby's creation, support and common backup purposes.
+
+It contains two main programs, \fIzfsbackup\fR and \fIzfsrestore\fR, which can be used from command line (also from cron), on standalone systems or as part of complex backup solution. Backups creation process using GZip with maximum compression by default, to reduce backups size and network traffic.
+
+Package can backup data to local or NFS mountpoint, or from remote machine to backup server to local ZFS filesystem.
+
+You can create backups on backup server from remote machines directly to file archive (not only to local ZFS filesystem) onto disk or tape device.
+
+On backup server you also can backup received fs to file archive using this package.
+
+Filesystems restore also can be from local or NFS mountpoint with created by \fIzfsbackup\fR archive file or from backup server to remote machine.
+.br
+
+.br
+.SH OPTIONS
+.TP
+.B \-v
+Verbose flag.
+.TP
+.B \-n
+Turn off compression (both on local and remote side).
+.TP
+.B \-r
+Remote mode - restore to remote machine. By default (without -f option) restore will be done from local ZFS filesystem.
+.TP
+.B \-f
+Remote mode - restore to remote machine from file (compressed by default, uncompressed with -n option).
+
+.SH PERFORMING RESTORE
+
+.br
+Restore from compressed or uncompressed streams, or from backup server to remote machine performs by \fIzfsrestore\fR command.
+
+.br
+Command can be run with two modes:
+
+1. Restore from archive (local or NFS).
+.br
+2. Restore fs from remote backup server via SSH.
+
+.br
+This command is similar for \fIzfsbackup\fR and also can run in local mode:
+
+# \fIzfsrestore\fR [-v] [-n ] /mntpoint/arc [local_fs]
+
+where first (required) argument is archive name (compressed or uncompressed) (can contains absolute or relative path), second (optional) argument is target ZFS-pool or dataset (pool or dataset must be created before restore procedure) for which restore will performs. Second argument (ZFS-pool/dataset) is non-required. If it omitted,the target pool name extracts from archive file name, for example, for archive server5.data%work2.0.zfs.gz pool name will be "data".
+
+Or you can restore ZFS in remote mode:
+
+# \fIzfsrestore\fR [-v] [-n] -r [-f] /mntpt/arc|local_fs
+                               [remote_fs] [user@]host
+
+Remote restore can be done from local ZFS filesystem (option -r, backed up previously by \fIzfsbackup\fR or manual zfs send command) or from compressed or uncompressed (option -n) archive (option -f), created by \fIzfsbackup\fR (locally or remote). In case of compressed stream restoring, GZip must be installed on target machine, if it unavaliable, you must uncompress stream manually on another machine and performs restore from uncompressed stream (with .zfs extension). 
+
+If you need selective restore, it is recommended to create the different (from  original) target pool/dataset and to perform restore into  it. For bare-metal restore you must re-create ZFS-pool with previous name (equal with archived).
+
+If you performs restore to existing filesystem (non-empty), existing data will be overwritten, new data will be added.
+
+If mountpoint /usr is unavaliable (for any reason) during recovery, command execution is impossible and you must perform
+.br
+
+.br
+.SH MANUAL RESTORE
+
+.br
+Manual recovery performs in cases if \fIzfsrestore\fR execution is impossible for any reason (system runs single-user mode on UFS root filesystem for separate slice for /usr filesystem, root pool recovery with external media boot etc.).
+.br
+
+.br
+Manual recovery is so simple but required SA attention.
+.br
+
+.br
+If target ZFS-pool is absend, you must create it first before data recovery. Also you must check target pool for consistancy with zpool status target_pool command. In case of selective recovery on any dataset, it also must be created before performing recovery.
+.br
+
+.br
+Example of whole pool recovery:
+
+# zpool create data c0t0d0s6
+.br
+# gzcat server5.data.0.zfs.gz | zfs receive -vdF data
+
+.br
+After this operation you cannot performs any additional actions, top-level filesystem hierarchy recovery performs in single action.
+.br
+
+.br
+Example of dataset recovery:
+
+# gzcat server5.data%work2.0.zfs.gz|zfs receive -vdF data
+.br
+# zfs destroy -r data/work2@snapshot
+
+.br
+When dataset recovery procedure, target pool in which recovering system was also must exists before recovery. After dataset restoring, you must recursively remove top-level stream snapshot, because of it remains in filesystems after zfs receive procedure. 
+.br
+
+.br
+Remember, if archiver unavailable on target machine during recovery, you need to decompress stream on another machine and performs recovery with another command, for example:
+.br
+
+.br
+# zfs receive -vdF data < server5.data%work2.0.zfs.gz
+.br
+
+.br
+You can do this procedure also via network, using SSH or another transfer service.
+.br
+
+.br
+.SH ROOT POOL RECOVERY
+
+.br
+Root pool recovery procedure, in case of full system disk crash, requires more SA attention and must be done manually.
+
+When replacing damaged system disk you must execute some required steps. Also, if you have remote backup or archive of root pool, you can recover destroyed system disk in reasonable short time. First of all, you need backup root pool to restore them - compressed or uncompressed archive or saved remote file system on backup server.
+
+Recovery procedure steps completely described below.
+
+1. You need to boot up crached system from external media - DVD, CD, USB or network:
+
+ok boot cdrom
+
+or
+
+ok boot net
+
+2. You need to configure remote access for R-utilities on backup server, which is contains backup (archive or received filesystem), and start network services:
+
+backup_server# netservices open
+.br
+backup_server# vi /.rhosts
+.br
+backup_server# vi /etc/hosts_equiv
+
+If backup server has running IPF, you need to grant access from recovering machine.
+
+3. When system disc is physically damaged and you want to replace it, you need to relabel new disk and make slices on it. Disk label type must be SMI.
+
+4. You need recreate root pool on recovering machine, for example:
+
+# zpool create -f -o failmode=continue -R /a -m legacy rpool
+                                                    c0t0d0s0
+
+5. You need to install boot blocks on new disk:
+
+# installboot -F zfs 
+  /usr/platform/`uname -i`/lib/fs/zfs/bootblk
+                           /dev/rdsk/c0t0d0s0
+
+or
+
+# installgrub /boot/grub/stage1 /boot/grub/stage2
+                               /dev/rdsk/c0t0d0s0
+
+6. The next step is recursive snapshot receiving and pool recovery from remote backup server:
+
+# rsh backup_server zfs send backup_data/rpool|zfs receive -Fdv rpool
+
+or from compressed archive on remote backup server:
+
+# rsh backup_server gzip -c -d pegasus.rpool.0.zfs.gz|zfs receive -Fdv rpool
+
+You can also recover root pool directly from local archive copy, contains on local mounted USB-drive, for example (unarchived stream only, for compressed archive you must first decompress it following GZip unavailablilty in single user mode when bootinog from distribution media):
+
+# cd /usbmount
+.br
+# cat pegasus.rpool.0.zfs|zfs receive -dFv rpool
+
+This step can required some time.
+
+7. Be sure that root pool was successfully restored from backup with zfs list command.
+
+8. You need to set bootfs property for root pool to correct (original) value:
+
+# zpool set bootfs=rpool/ROOT/s10x_u8wos_08a rpool
+
+Dump and swap devices recreation is not required if root pool backup  snapshot was recirsive or was done with \fIzfsbackup\fR. Recursive snapshot contains dump and swap devices and they will be recreated during recovery automatically.
+
+9. Reboot system from recovered snapshot:
+
+# init 6
+.br
+
+.br
+.SH SEE ALSO
+
+.br
+   \fIzfsbackup\fR (1M), zfs (1M), zpool (1M), gzip (1M), ssh (1M)
+.br
+
+.SH NOTES
+
+Against pool recreation and recovery you can use (starting from 10/09) zflash functionality and recover root pool with JumpStart flash install from uncompressed stream (archive) created by \fIzfsbackup\fR.
+
+\fIzfsbackup\fR/\fIzfsrestore\fR works on Solaris 10 10/08 and above and OpenSolaris 2008.11 and above.
+
+\fIzfsbackup\fR/\fIzfsrestore\fR supports ZFS archives creation and streams transfer from Solaris 10 8/07 (supports only non-root pools), from release 10/08 also supports ZFS root pools.
+
+Suggesting use \fIzfsbackup\fR/\fIzfsrestore\fR in multi-user mode, when /usr mountpoint is completely available. Data recovery with \fIzfsrestore\fR recommended, but not required, also you can restore data from archives with manual procedure (as described in \fIzfsrestore\fR (1M)), because of backup is simple ZFS-stream (compressed with GZip or not) or received filesystem, which is meant, that you can use command /sbin/zfs receive to recovery.
+
+ZRescue uses SSH for remote transfers. For huge data volumes it can generate heavy CPU usage on both hosts.
+
+.br

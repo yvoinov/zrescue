@@ -1,0 +1,83 @@
+ZRescue - ZFS Backup/Restore       (C) 2009,2016 Yuri Voinov
+
+***************
+* Version 2.0 *
+***************
+
+Root pool recovery procedure
+----------------------------
+
+Root pool recovery procedure, in case of full system disk crash, requires much more SA attention and must be do manually.
+
+When replacing damaged system disk you must execute some required steps. Also, if you have remote backup or archive of root
+pool, you can recover destroyed system disk in reasonable short time.
+
+First of all, you need backup root pool to restore them - compressed or uncompressed archive or saved remote file system
+on backup server.
+
+Recovery procedure steps completely described below.
+
+1. You need to boot up crached system from external media - DVD,CD, USB or network:
+
+ok boot cdrom
+
+or
+
+ok boot net
+
+2. You need to configure remote access for R-utilities on backup server, which is contains backup (archive or received
+filesystem), and start network services:
+
+backup_server# netservices open
+backup_server# vi /.rhosts
+backup_server# vi /etc/hosts_equiv
+
+If backup server running IPF, you need to grant access from recovering machine.
+
+3. When system disc is physically damaged and you want to replace it, you need to relabel new disk and make slices on it. Disk
+label type must be SMI.
+
+4. You need recreate root pool on recovering machine, for example:
+
+# zpool create -f -o failmode=continue -R /a -m legacy rpool c0t0d0s0
+
+5. You need to install boot blocks on new disk:
+
+# installboot -F zfs /usr/platform/`uname -i`/lib/fs/zfs/bootblk  /dev/rdsk/c0t0d0s0
+
+or
+
+# installgrub /boot/grub/stage1 /boot/grub/stage2 /dev/rdsk/c0t0d0s0
+
+6. The next step is recursive snapshot receiving and pool recovery from remote backup server:
+
+# rsh backup_server zfs send backup_data/rpool|zfs receive -Fdv rpool
+
+or from compressed archive on remote backup server:
+
+# rsh backup_server gzip -c -d pegasus.rpool.0.zfs.gz|zfs receive -Fdv rpool
+
+You can also recover root pool directly from local archive copy, contains on local mounted USB-drive, for example (unarchived
+stream only, for compressed archive you must decompress it first following GZip often unavailable in single user mode when
+bootinog from distribution media):
+
+# cd /usbmount
+# cat pegasus.rpool.0.zfs|zfs receive -dFv rpool
+
+This step can take some time.
+
+7. Be sure that root pool was successfully restored from backup with zfs list command.
+
+8. You need to set bootfs property for root pool to correct (original) value:
+
+# zpool set bootfs=rpool/ROOT/s10x_u8wos_08a rpool
+
+Dump and swap device recreation is non required when root pool backup snapshot was recirsive or was done with zfsbackup.
+Recursive snapshot contains dump and swap devices and they will be recreated during recovery automatically.
+
+9. Finally reboot recovered system:
+
+# init 6
+
+Note: Instead of pool recreation and recovery you can use (starting from 10/09) zflash functionality and recover root pool with
+JumpStart flash install from uncompressed stream (archive) created by zfsbackup.
